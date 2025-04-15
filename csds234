@@ -27,18 +27,17 @@ class GameRecommender:
         
     def connect_to_mongodb(self):
         try:
-            connection_url = (
-                "mongodb://cxq91:Qq12345678@ac-lsikpgh-shard-00-00.wtghhj8.mongodb.net:27017,"
-                "ac-lsikpgh-shard-00-01.wtghhj8.mongodb.net:27017,"
-                "ac-lsikpgh-shard-00-02.wtghhj8.mongodb.net:27017/"
-                "?replicaSet=atlas-nr1rzc-shard-0&ssl=true&authSource=admin"
-            )
+            # Use the SRV format as recommended in MongoDB Atlas
+            connection_url = "mongodb+srv://G:WSGdsb123321.@ac-lsikpgh.wtghhj8.mongodb.net/?retryWrites=true&w=majority&appName=project234"
+            
+            # Connect with minimal options
             self.client = MongoClient(connection_url)
             self.db = self.client["steamDB"]
             self.collection = self.db["steam_games"]
             print("MongoDB connected successfully")
         except Exception as e:
             messagebox.showerror("Connection error", f"Failed to connect to MongoDB: {e}")
+            print(f"MongoDB connection error: {e}")
     
     def create_platform_selection(self):
         # Clear existing widgets
@@ -174,8 +173,11 @@ class GameRecommender:
                 ).pack(side="left")
                 
                 # Add game details
-                details = f"Price: ${game.get('price', 0)} | "
-                details += f"Peak CCU: {game.get('peak_ccu', 0)} | "
+                details_frame = ttk.Frame(game_frame)
+                details_frame.pack(side="left", fill="x", expand=True, padx=10)
+                
+                # First row: Basic details
+                basic_details = f"Price: ${game.get('price', 0)} | Peak CCU: {game.get('peak_ccu', 0)}"
                 
                 # Calculate positive rate
                 positive = game.get("positive", 0)
@@ -184,9 +186,24 @@ class GameRecommender:
                     positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
                 else:
                     positive_rate = "N/A"
-                details += f"Positive Rate: {positive_rate}"
+                basic_details += f" | Positive Rate: {positive_rate}"
                 
-                ttk.Label(game_frame, text=details).pack(side="left", padx=10)
+                ttk.Label(details_frame, text=basic_details).pack(anchor="w")
+                
+                # Second row: Tags
+                tags_text = "Tags: "
+                try:
+                    tags = game.get("tags", "")
+                    if tags:
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])  # Show first 5 tags
+                    else:
+                        tags_text += "None"
+                except:
+                    tags_text += "None"
+                
+                ttk.Label(details_frame, text=tags_text).pack(anchor="w")
             
             # Add selection count label
             self.selection_count_label = ttk.Label(results_frame, text="Selected: 0/3")
@@ -201,6 +218,9 @@ class GameRecommender:
             
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {e}")
+            print(f"Error in show_recommendations: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_selection_count(self, game_id_str):
         # Count selected games
@@ -305,6 +325,11 @@ class GameRecommender:
             results_frame = ttk.LabelFrame(similar_window, text=f"Games similar to your selections")
             results_frame.pack(padx=20, pady=20, fill="both", expand=True)
             
+            # Display the top tags being used for recommendation
+            tags_frame = ttk.Frame(results_frame)
+            tags_frame.pack(fill="x", padx=5, pady=5)
+            ttk.Label(tags_frame, text="Recommended based on tags: " + ", ".join(top_tags)).pack(anchor="w")
+            
             # Create canvas and scrollbar for scrollable frame
             canvas = tk.Canvas(results_frame)
             scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=canvas.yview)
@@ -322,17 +347,20 @@ class GameRecommender:
             canvas.pack(side="left", fill="both", expand=True)
             scrollbar.pack(side="right", fill="y")
             
-            # Add results to scrollable frame
-            similar_game_count = 0
-            for game in results:
-                similar_game_count += 1
-                game_frame = ttk.Frame(scrollable_frame)
+            # First, display the selected games
+            selected_games_frame = ttk.LabelFrame(scrollable_frame, text="Your Selected Games")
+            selected_games_frame.pack(fill="x", padx=5, pady=5)
+            
+            for game in selected_games:
+                game_frame = ttk.Frame(selected_games_frame)
                 game_frame.pack(fill="x", padx=5, pady=5)
                 
-                # Add game details
-                details = f"{game.get('name', 'Unknown')} | "
-                details += f"Price: ${game.get('price', 0)} | "
-                details += f"Peak CCU: {game.get('peak_ccu', 0)} | "
+                # Add game name with bold font
+                game_name = tk.Label(game_frame, text=game.get('name', 'Unknown'), font=("Arial", 10, "bold"))
+                game_name.pack(side="left", padx=5)
+                
+                # Basic details 
+                basic_details = f"Price: ${game.get('price', 0)} | Peak CCU: {game.get('peak_ccu', 0)}"
                 
                 # Calculate positive rate
                 positive = game.get("positive", 0)
@@ -341,14 +369,83 @@ class GameRecommender:
                     positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
                 else:
                     positive_rate = "N/A"
-                details += f"Positive Rate: {positive_rate}"
+                basic_details += f" | Positive Rate: {positive_rate}"
                 
-                ttk.Label(game_frame, text=details).pack(side="left", padx=10)
+                ttk.Label(game_frame, text=basic_details).pack(side="left", padx=5)
+                
+                # Tags
+                tags_text = "Tags: "
+                try:
+                    tags = game.get("tags", "")
+                    if tags:
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])  # Show first 5 tags
+                    else:
+                        tags_text += "None"
+                except:
+                    tags_text += "None"
+                
+                ttk.Label(game_frame, text=tags_text).pack(side="left", padx=5)
+            
+            # Add a separator between selected games and recommendations
+            ttk.Separator(scrollable_frame, orient="horizontal").pack(fill="x", pady=10)
+            
+            # Now display the recommended games
+            recommendations_frame = ttk.LabelFrame(scrollable_frame, text="Recommended Games")
+            recommendations_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Add results to scrollable frame
+            similar_game_count = 0
+            for game in results:
+                similar_game_count += 1
+                game_frame = ttk.Frame(recommendations_frame)
+                game_frame.pack(fill="x", padx=5, pady=5)
+                
+                # Create a frame for game details
+                details_frame = ttk.Frame(game_frame)
+                details_frame.pack(fill="x", expand=True, padx=10)
+                
+                # Add game name with bold font
+                game_name = tk.Label(details_frame, text=game.get('name', 'Unknown'), font=("Arial", 10, "bold"))
+                game_name.pack(anchor="w")
+                
+                # Basic details row
+                basic_details = f"Price: ${game.get('price', 0)} | Peak CCU: {game.get('peak_ccu', 0)}"
+                
+                # Calculate positive rate
+                positive = game.get("positive", 0)
+                negative = game.get("negative", 0)
+                if positive + negative > 0:
+                    positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
+                else:
+                    positive_rate = "N/A"
+                basic_details += f" | Positive Rate: {positive_rate}"
+                
+                ttk.Label(details_frame, text=basic_details).pack(anchor="w")
+                
+                # Tags row
+                tags_text = "Tags: "
+                try:
+                    tags = game.get("tags", "")
+                    if tags:
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])  # Show first 5 tags
+                    else:
+                        tags_text += "None"
+                except:
+                    tags_text += "None"
+                
+                ttk.Label(details_frame, text=tags_text).pack(anchor="w")
+                
+                # Add separator
+                ttk.Separator(recommendations_frame, orient="horizontal").pack(fill="x", pady=5)
             
             if similar_game_count == 0:
-                ttk.Label(scrollable_frame, text="No similar games found based on the tags.").pack(pady=10)
+                ttk.Label(recommendations_frame, text="No similar games found based on the tags.").pack(pady=10)
             
-            # Add close button (should be outside the loop and attached to results_frame, not scrollable_frame)
+            # Add close button
             ttk.Button(results_frame, text="Close", command=similar_window.destroy).pack(pady=20, side=tk.BOTTOM)
             
         except Exception as e:
