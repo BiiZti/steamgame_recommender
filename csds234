@@ -1,0 +1,363 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from pymongo import MongoClient
+import json
+from collections import Counter
+from bson.objectid import ObjectId
+import re
+
+class GameRecommender:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Game Recommendation System")
+        self.root.geometry("800x600")
+        
+        # Connect to MongoDB
+        self.connect_to_mongodb()
+        
+        # Initialize variables
+        self.selected_platforms = []
+        self.price_range = (0, 100)
+        self.selected_games = []  # List to store selected games
+        self.max_selections = 3  # Maximum number of games user can select
+        self.game_checkboxes = {}  # Dictionary to store game checkboxes
+        
+        # Create UI elements
+        self.create_platform_selection()
+        
+    def connect_to_mongodb(self):
+        try:
+            connection_url = (
+                "mongodb://cxq91:Qq12345678@ac-lsikpgh-shard-00-00.wtghhj8.mongodb.net:27017,"
+                "ac-lsikpgh-shard-00-01.wtghhj8.mongodb.net:27017,"
+                "ac-lsikpgh-shard-00-02.wtghhj8.mongodb.net:27017/"
+                "?replicaSet=atlas-nr1rzc-shard-0&ssl=true&authSource=admin"
+            )
+            self.client = MongoClient(connection_url)
+            self.db = self.client["steamDB"]
+            self.collection = self.db["steam_games"]
+            print("MongoDB connected successfully")
+        except Exception as e:
+            messagebox.showerror("Connection error", f"Failed to connect to MongoDB: {e}")
+    
+    def create_platform_selection(self):
+        # Clear existing widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create platform selection frame
+        platform_frame = ttk.LabelFrame(self.root, text="Select Platforms")
+        platform_frame.pack(padx=20, pady=20, fill="both", expand=True)
+        
+        # Platform checkboxes
+        self.windows_var = tk.BooleanVar()
+        self.mac_var = tk.BooleanVar()
+        self.linux_var = tk.BooleanVar()
+        
+        ttk.Checkbutton(platform_frame, text="Windows", variable=self.windows_var).pack(pady=5)
+        ttk.Checkbutton(platform_frame, text="Mac", variable=self.mac_var).pack(pady=5)
+        ttk.Checkbutton(platform_frame, text="Linux", variable=self.linux_var).pack(pady=5)
+        
+        # Next button
+        ttk.Button(platform_frame, text="Next", command=self.create_price_selection).pack(pady=20)
+    
+    def create_price_selection(self):
+        # Get selected platforms
+        self.selected_platforms = []
+        if self.windows_var.get():
+            self.selected_platforms.append("windows")
+        if self.mac_var.get():
+            self.selected_platforms.append("mac")
+        if self.linux_var.get():
+            self.selected_platforms.append("linux")
+        
+        if not self.selected_platforms:
+            messagebox.showwarning("Warning", "Please select at least one platform")
+            return
+        
+        # Clear existing widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create price range selection frame
+        price_frame = ttk.LabelFrame(self.root, text="Select Price Range")
+        price_frame.pack(padx=20, pady=20, fill="both", expand=True)
+        
+        # Predefined price ranges
+        price_ranges = [
+            ("Free", (0, 0)),
+            ("Under $10", (0, 10)),
+            ("$10 - $20", (10, 20)),
+            ("$20 - $30", (20, 30)),
+            ("$30 - $40", (30, 40)),
+            ("$40 - $50", (40, 50)),
+            ("$50 and above", (50, 1000))
+        ]
+        
+        self.price_var = tk.StringVar()
+        for text, (min_price, max_price) in price_ranges:
+            ttk.Radiobutton(
+                price_frame,
+                text=text,
+                variable=self.price_var,
+                value=f"{min_price}-{max_price}"
+            ).pack(pady=5)
+        
+        # Set default selection
+        self.price_var.set("0-1000")
+        
+        # Next button
+        ttk.Button(price_frame, text="Get Recommendations", command=self.show_recommendations).pack(pady=20)
+    
+    def show_recommendations(self):
+        try:
+            # Get price range
+            min_price, max_price = map(float, self.price_var.get().split("-"))
+            
+            # Build query
+            query = {
+                "price": {"$gte": min_price, "$lte": max_price}
+            }
+            
+            # Add platform conditions
+            platform_conditions = []
+            for platform in self.selected_platforms:
+                platform_conditions.append({platform: "True"})
+            
+            if platform_conditions:
+                query["$or"] = platform_conditions
+            
+            # Execute query and sort by peak_ccu
+            results = self.collection.find(query).sort("peak_ccu", -1).limit(20)  # Show more games for selection
+            
+            # Clear existing widgets
+            for widget in self.root.winfo_children():
+                widget.destroy()
+            
+            # Create results frame
+            results_frame = ttk.LabelFrame(self.root, text="Select up to 3 games you like")
+            results_frame.pack(padx=20, pady=20, fill="both", expand=True)
+            
+            # Create canvas and scrollbar for scrollable frame
+            canvas = tk.Canvas(results_frame)
+            scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # Pack canvas and scrollbar
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Clear previous checkboxes
+            self.game_checkboxes.clear()
+            
+            # Add results to scrollable frame
+            for game in results:
+                game_frame = ttk.Frame(scrollable_frame)
+                game_frame.pack(fill="x", padx=5, pady=5)
+                
+                # Create checkbox
+                var = tk.BooleanVar()
+                self.game_checkboxes[str(game.get("_id"))] = var
+                ttk.Checkbutton(
+                    game_frame,
+                    text=game.get("name", "Unknown"),
+                    variable=var,
+                    command=lambda gid=str(game.get("_id")): self.update_selection_count(gid)
+                ).pack(side="left")
+                
+                # Add game details
+                details = f"Price: ${game.get('price', 0)} | "
+                details += f"Peak CCU: {game.get('peak_ccu', 0)} | "
+                
+                # Calculate positive rate
+                positive = game.get("positive", 0)
+                negative = game.get("negative", 0)
+                if positive + negative > 0:
+                    positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
+                else:
+                    positive_rate = "N/A"
+                details += f"Positive Rate: {positive_rate}"
+                
+                ttk.Label(game_frame, text=details).pack(side="left", padx=10)
+            
+            # Add selection count label
+            self.selection_count_label = ttk.Label(results_frame, text="Selected: 0/3")
+            self.selection_count_label.pack(pady=5)
+            
+            # Add buttons
+            button_frame = ttk.Frame(results_frame)
+            button_frame.pack(pady=10)
+            
+            ttk.Button(button_frame, text="Get Similar Games", command=self.show_similar_games).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Start Over", command=self.create_platform_selection).pack(side=tk.LEFT, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {e}")
+    
+    def update_selection_count(self, game_id_str):
+        # Count selected games
+        selected_count = sum(1 for var in self.game_checkboxes.values() if var.get())
+        
+        if selected_count > self.max_selections:
+            # Uncheck the last selected game
+            self.game_checkboxes[game_id_str].set(False)
+            selected_count = self.max_selections
+            messagebox.showwarning("Warning", f"You can only select up to {self.max_selections} games")
+        
+        self.selection_count_label.config(text=f"Selected: {selected_count}/{self.max_selections}")
+    
+    def show_similar_games(self):
+        try:
+            # Get selected game IDs (as strings)
+            selected_game_id_strs = [game_id_str for game_id_str, var in self.game_checkboxes.items() if var.get()]
+            
+            if not selected_game_id_strs:
+                messagebox.showwarning("Warning", "Please select at least one game")
+                return
+            
+            # Convert string IDs to ObjectIds
+            selected_object_ids = []
+            for game_id_str in selected_game_id_strs:
+                try:
+                    selected_object_ids.append(ObjectId(game_id_str))
+                except Exception as e:
+                    print(f"Error converting ID {game_id_str} to ObjectId: {e}")
+                    continue # Skip invalid IDs
+            
+            # Fetch game details using the ObjectIds
+            selected_games = []
+            if selected_object_ids:
+                selected_games_cursor = self.collection.find({"_id": {"$in": selected_object_ids}})
+                selected_games = list(selected_games_cursor)
+            
+            # Double check if games were found (might fail if IDs were invalid)
+            if not selected_games:
+                 messagebox.showerror("Error", "Could not retrieve details for selected games.")
+                 return
+            
+            # Collect all tags from selected games
+            all_tags = []
+            for game in selected_games:
+                tags = game.get("tags", "")
+                if tags:
+                    try:
+                        # Ensure tags are treated as a dictionary string
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        all_tags.extend(tag_dict.keys())
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"Error parsing tags for game {game.get('name')}: {e}")
+                        continue
+            
+            if not all_tags:
+                 messagebox.showinfo("Info", "No common tags found among selected games to find similar ones.")
+                 return
+            
+            # Count tag occurrences
+            tag_counter = Counter(all_tags)
+            # Get top 5 most common tags
+            top_tags = [tag for tag, _ in tag_counter.most_common(5)]
+            
+            # --- Add previous filters --- 
+            # Get price range from the variable set in create_price_selection
+            min_price, max_price = map(float, self.price_var.get().split("-"))
+            
+            # Get selected platforms from the instance variable
+            platforms_to_filter = self.selected_platforms
+            # --- End Add previous filters --- 
+
+            # Build query for similar games
+            query = {
+                # Use the list of ObjectIds directly
+                "_id": {"$nin": selected_object_ids},
+                # Ensure tags are properly escaped for regex if needed
+                "tags": {"$regex": "|".join(map(re.escape, top_tags)), "$options": "i"}, # Case-insensitive search
+                # Add price filter
+                "price": {"$gte": min_price, "$lte": max_price}
+            }
+            
+            # Add platform conditions (same as in show_recommendations)
+            platform_conditions = []
+            for platform in platforms_to_filter:
+                platform_conditions.append({platform: "True"})
+            
+            if platform_conditions:
+                query["$or"] = platform_conditions
+            # --- End integrating filters into query ---
+            
+            # Execute query and sort by peak_ccu
+            results = self.collection.find(query).sort("peak_ccu", -1).limit(10)
+            
+            # Create new window for similar games
+            similar_window = tk.Toplevel(self.root)
+            similar_window.title("Similar Games")
+            similar_window.geometry("800x600")
+            
+            # Create results frame
+            results_frame = ttk.LabelFrame(similar_window, text=f"Games similar to your selections")
+            results_frame.pack(padx=20, pady=20, fill="both", expand=True)
+            
+            # Create canvas and scrollbar for scrollable frame
+            canvas = tk.Canvas(results_frame)
+            scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # Pack canvas and scrollbar
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Add results to scrollable frame
+            similar_game_count = 0
+            for game in results:
+                similar_game_count += 1
+                game_frame = ttk.Frame(scrollable_frame)
+                game_frame.pack(fill="x", padx=5, pady=5)
+                
+                # Add game details
+                details = f"{game.get('name', 'Unknown')} | "
+                details += f"Price: ${game.get('price', 0)} | "
+                details += f"Peak CCU: {game.get('peak_ccu', 0)} | "
+                
+                # Calculate positive rate
+                positive = game.get("positive", 0)
+                negative = game.get("negative", 0)
+                if positive + negative > 0:
+                    positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
+                else:
+                    positive_rate = "N/A"
+                details += f"Positive Rate: {positive_rate}"
+                
+                ttk.Label(game_frame, text=details).pack(side="left", padx=10)
+            
+            if similar_game_count == 0:
+                ttk.Label(scrollable_frame, text="No similar games found based on the tags.").pack(pady=10)
+            
+            # Add close button (should be outside the loop and attached to results_frame, not scrollable_frame)
+            ttk.Button(results_frame, text="Close", command=similar_window.destroy).pack(pady=20, side=tk.BOTTOM)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while fetching similar games: {e}")
+            # Print detailed error for debugging
+            import traceback
+            traceback.print_exc()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = GameRecommender(root)
+    root.mainloop() 
