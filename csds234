@@ -10,7 +10,18 @@ class GameRecommender:
     def __init__(self, root):
         self.root = root
         self.root.title("Game Recommendation System")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x700")
+        self.root.configure(bg='#f0f0f0')
+        
+        # Set style
+        self.style = ttk.Style()
+        self.style.configure('TFrame', background='#f0f0f0')
+        self.style.configure('TLabel', background='#f0f0f0', font=('Arial', 10))
+        self.style.configure('TButton', font=('Arial', 10))
+        self.style.configure('TCheckbutton', background='#f0f0f0', font=('Arial', 10))
+        self.style.configure('TRadiobutton', background='#f0f0f0', font=('Arial', 10))
+        self.style.configure('TLabelframe', background='#f0f0f0', font=('Arial', 11, 'bold'))
+        self.style.configure('TLabelframe.Label', background='#f0f0f0', font=('Arial', 11, 'bold'))
         
         # Connect to MongoDB
         self.connect_to_mongodb()
@@ -18,9 +29,12 @@ class GameRecommender:
         # Initialize variables
         self.selected_platforms = []
         self.price_range = (0, 100)
-        self.selected_games = []  # List to store selected games
-        self.max_selections = 3  # Maximum number of games user can select
-        self.game_checkboxes = {}  # Dictionary to store game checkboxes
+        self.selected_games = []
+        self.max_selections = 3
+        self.game_checkboxes = {}
+        
+        # Create header
+        self.create_header()
         
         # Create UI elements
         self.create_platform_selection()
@@ -39,26 +53,85 @@ class GameRecommender:
             messagebox.showerror("Connection error", f"Failed to connect to MongoDB: {e}")
             print(f"MongoDB connection error: {e}")
     
+    def create_header(self):
+        header_frame = ttk.Frame(self.root)
+        header_frame.pack(fill="x", padx=20, pady=10)
+        
+        title_label = tk.Label(
+            header_frame,
+            text="Game Recommendation System",
+            font=('Arial', 16, 'bold'),
+            bg='#f0f0f0',
+            fg='#333333'
+        )
+        title_label.pack(pady=5)
+        
+        subtitle_label = tk.Label(
+            header_frame,
+            text="Find your next favorite game!",
+            font=('Arial', 12),
+            bg='#f0f0f0',
+            fg='#666666'
+        )
+        subtitle_label.pack()
+        
+        separator = ttk.Separator(header_frame, orient='horizontal')
+        separator.pack(fill='x', pady=10)
+    
     def create_platform_selection(self):
         # Clear existing widgets
         for widget in self.root.winfo_children():
-            widget.destroy()
+            if not isinstance(widget, ttk.Frame) or not widget.winfo_children():
+                widget.destroy()
         
         # Create platform selection frame
         platform_frame = ttk.LabelFrame(self.root, text="Select Platforms")
         platform_frame.pack(padx=20, pady=20, fill="both", expand=True)
         
-        # Platform checkboxes
+        # Add description
+        desc_label = tk.Label(
+            platform_frame,
+            text="Choose the platforms you want to play on:",
+            font=('Arial', 10),
+            bg='#f0f0f0',
+            fg='#333333'
+        )
+        desc_label.pack(pady=10)
+        
+        # Platform checkboxes with custom style
         self.windows_var = tk.BooleanVar()
         self.mac_var = tk.BooleanVar()
         self.linux_var = tk.BooleanVar()
         
-        ttk.Checkbutton(platform_frame, text="Windows", variable=self.windows_var).pack(pady=5)
-        ttk.Checkbutton(platform_frame, text="Mac", variable=self.mac_var).pack(pady=5)
-        ttk.Checkbutton(platform_frame, text="Linux", variable=self.linux_var).pack(pady=5)
+        platforms = [
+            ("Windows", self.windows_var),
+            ("Mac", self.mac_var),
+            ("Linux", self.linux_var)
+        ]
         
-        # Next button
-        ttk.Button(platform_frame, text="Next", command=self.create_price_selection).pack(pady=20)
+        for platform, var in platforms:
+            frame = ttk.Frame(platform_frame)
+            frame.pack(pady=5, padx=20, fill="x")
+            
+            checkbox = ttk.Checkbutton(
+                frame,
+                text=platform,
+                variable=var,
+                style='TCheckbutton'
+            )
+            checkbox.pack(side="left")
+        
+        # Next button with custom style
+        button_frame = ttk.Frame(platform_frame)
+        button_frame.pack(pady=20)
+        
+        next_button = ttk.Button(
+            button_frame,
+            text="Next",
+            command=self.create_price_selection,
+            style='TButton'
+        )
+        next_button.pack(pady=10, ipadx=20, ipady=5)
     
     def create_price_selection(self):
         # Get selected platforms
@@ -76,13 +149,24 @@ class GameRecommender:
         
         # Clear existing widgets
         for widget in self.root.winfo_children():
-            widget.destroy()
+            if not isinstance(widget, ttk.Frame) or not widget.winfo_children():
+                widget.destroy()
         
         # Create price range selection frame
         price_frame = ttk.LabelFrame(self.root, text="Select Price Range")
         price_frame.pack(padx=20, pady=20, fill="both", expand=True)
         
-        # Predefined price ranges
+        # Add description
+        desc_label = tk.Label(
+            price_frame,
+            text="Choose your preferred price range:",
+            font=('Arial', 10),
+            bg='#f0f0f0',
+            fg='#333333'
+        )
+        desc_label.pack(pady=10)
+        
+        # Predefined price ranges with custom style
         price_ranges = [
             ("Free", (0, 0)),
             ("Under $10", (0, 10)),
@@ -95,19 +179,68 @@ class GameRecommender:
         
         self.price_var = tk.StringVar()
         for text, (min_price, max_price) in price_ranges:
-            ttk.Radiobutton(
-                price_frame,
+            frame = ttk.Frame(price_frame)
+            frame.pack(pady=5, padx=20, fill="x")
+            
+            radio = ttk.Radiobutton(
+                frame,
                 text=text,
                 variable=self.price_var,
-                value=f"{min_price}-{max_price}"
-            ).pack(pady=5)
+                value=f"{min_price}-{max_price}",
+                style='TRadiobutton'
+            )
+            radio.pack(side="left")
         
         # Set default selection
         self.price_var.set("0-1000")
         
-        # Next button
-        ttk.Button(price_frame, text="Get Recommendations", command=self.show_recommendations).pack(pady=20)
+        # Get Recommendations button with custom style
+        button_frame = ttk.Frame(price_frame)
+        button_frame.pack(pady=20)
+        
+        rec_button = ttk.Button(
+            button_frame,
+            text="Get Recommendations",
+            command=self.show_recommendations,
+            style='TButton'
+        )
+        rec_button.pack(pady=10, ipadx=20, ipady=5)
     
+    def calculate_game_weight(self, game, min_price, max_price):
+        """Calculate weight score (0-10) based on price, peak_ccu, and positive rate"""
+        try:
+            # Get game attributes
+            price = float(game.get('price', 100))  # Default to 100 if price is missing
+            peak_ccu = int(game.get('peak_ccu', 0))
+            positive = int(game.get('positive', 0))
+            negative = int(game.get('negative', 0))
+            
+            # Calculate positive rate
+            total_reviews = positive + negative
+            positive_rate = positive / total_reviews if total_reviews > 0 else 0
+            
+            # Peak CCU: higher is better
+            max_ccu = 100000  # Assuming max peak CCU is 100,000
+            ccu_score = min(peak_ccu / max_ccu, 1)
+            
+            # Positive rate: higher is better
+            positive_score = positive_rate
+            
+            # Check if price range is above $50
+            if max_price > 50:
+                # Exclude price from calculation, adjust weights
+                weight = (ccu_score * 0.5 + positive_score * 0.5) * 10
+            else:
+                # Include price in calculation
+                max_price = 100  # Assuming max price is $100
+                price_score = 1 - (price / max_price) if price <= max_price else 0
+                weight = (price_score * 0.4 + ccu_score * 0.3 + positive_score * 0.3) * 10
+            
+            return round(weight, 1)
+        except Exception as e:
+            print(f"Error calculating weight: {e}")
+            return 0.0
+
     def show_recommendations(self):
         try:
             # Get price range
@@ -127,18 +260,29 @@ class GameRecommender:
                 query["$or"] = platform_conditions
             
             # Execute query and sort by peak_ccu
-            results = self.collection.find(query).sort("peak_ccu", -1).limit(20)  # Show more games for selection
+            results = self.collection.find(query).sort("peak_ccu", -1).limit(20)
             
             # Clear existing widgets
             for widget in self.root.winfo_children():
-                widget.destroy()
+                if not isinstance(widget, ttk.Frame) or not widget.winfo_children():
+                    widget.destroy()
             
             # Create results frame
             results_frame = ttk.LabelFrame(self.root, text="Select up to 3 games you like")
             results_frame.pack(padx=20, pady=20, fill="both", expand=True)
             
+            # Add description
+            desc_label = tk.Label(
+                results_frame,
+                text="Select the games you enjoy to get personalized recommendations:",
+                font=('Arial', 10),
+                bg='#f0f0f0',
+                fg='#333333'
+            )
+            desc_label.pack(pady=10)
+            
             # Create canvas and scrollbar for scrollable frame
-            canvas = tk.Canvas(results_frame)
+            canvas = tk.Canvas(results_frame, bg='#f0f0f0', highlightthickness=0)
             scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas)
             
@@ -151,7 +295,7 @@ class GameRecommender:
             canvas.configure(yscrollcommand=scrollbar.set)
             
             # Pack canvas and scrollbar
-            canvas.pack(side="left", fill="both", expand=True)
+            canvas.pack(side="left", fill="both", expand=True, padx=10)
             scrollbar.pack(side="right", fill="y")
             
             # Clear previous checkboxes
@@ -162,18 +306,29 @@ class GameRecommender:
                 game_frame = ttk.Frame(scrollable_frame)
                 game_frame.pack(fill="x", padx=5, pady=5)
                 
+                # Calculate weight for this game
+                weight = self.calculate_game_weight(game, min_price, max_price)
+                
                 # Create checkbox
                 var = tk.BooleanVar()
                 self.game_checkboxes[str(game.get("_id"))] = var
-                ttk.Checkbutton(
-                    game_frame,
+                
+                # Create a frame for the checkbox and game details
+                content_frame = ttk.Frame(game_frame)
+                content_frame.pack(fill="x", expand=True)
+                
+                # Create checkbox with custom style
+                checkbox = ttk.Checkbutton(
+                    content_frame,
                     text=game.get("name", "Unknown"),
                     variable=var,
-                    command=lambda gid=str(game.get("_id")): self.update_selection_count(gid)
-                ).pack(side="left")
+                    command=lambda gid=str(game.get("_id")): self.update_selection_count(gid),
+                    style='TCheckbutton'
+                )
+                checkbox.pack(side="left", padx=5)
                 
                 # Add game details
-                details_frame = ttk.Frame(game_frame)
+                details_frame = ttk.Frame(content_frame)
                 details_frame.pack(side="left", fill="x", expand=True, padx=10)
                 
                 # First row: Basic details
@@ -197,24 +352,58 @@ class GameRecommender:
                     if tags:
                         tag_str = tags.replace("'", "\"")
                         tag_dict = json.loads(tag_str)
-                        tags_text += ", ".join(list(tag_dict.keys())[:5])  # Show first 5 tags
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])
                     else:
                         tags_text += "None"
                 except:
                     tags_text += "None"
                 
                 ttk.Label(details_frame, text=tags_text).pack(anchor="w")
+                
+                # Third row: Weight Score
+                weight_text = f"Weight Score: {weight}/10"
+                weight_label = tk.Label(
+                    details_frame,
+                    text=weight_text,
+                    font=('Arial', 9, 'bold'),
+                    bg='#f0f0f0',
+                    fg='#2c5282'
+                )
+                weight_label.pack(anchor="w")
+                
+                # Add separator
+                separator = ttk.Separator(game_frame, orient='horizontal')
+                separator.pack(fill='x', pady=5)
             
             # Add selection count label
-            self.selection_count_label = ttk.Label(results_frame, text="Selected: 0/3")
+            self.selection_count_label = tk.Label(
+                results_frame,
+                text="Selected: 0/3",
+                font=('Arial', 10, 'bold'),
+                bg='#f0f0f0',
+                fg='#2c5282'
+            )
             self.selection_count_label.pack(pady=5)
             
             # Add buttons
             button_frame = ttk.Frame(results_frame)
             button_frame.pack(pady=10)
             
-            ttk.Button(button_frame, text="Get Similar Games", command=self.show_similar_games).pack(side=tk.LEFT, padx=5)
-            ttk.Button(button_frame, text="Start Over", command=self.create_platform_selection).pack(side=tk.LEFT, padx=5)
+            get_similar_button = ttk.Button(
+                button_frame,
+                text="Get Similar Games",
+                command=self.show_similar_games,
+                style='TButton'
+            )
+            get_similar_button.pack(side=tk.LEFT, padx=5, ipadx=20, ipady=5)
+            
+            start_over_button = ttk.Button(
+                button_frame,
+                text="Start Over",
+                command=self.create_platform_selection,
+                style='TButton'
+            )
+            start_over_button.pack(side=tk.LEFT, padx=5, ipadx=20, ipady=5)
             
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {e}")
@@ -438,6 +627,11 @@ class GameRecommender:
                     tags_text += "None"
                 
                 ttk.Label(details_frame, text=tags_text).pack(anchor="w")
+                
+                # Weight Score row
+                weight = self.calculate_game_weight(game, min_price, max_price)
+                weight_text = f"Weight Score: {weight}/10"
+                ttk.Label(details_frame, text=weight_text, font=("Arial", 9, "bold")).pack(anchor="w")
                 
                 # Add separator
                 ttk.Separator(recommendations_frame, orient="horizontal").pack(fill="x", pady=5)
