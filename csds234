@@ -210,7 +210,7 @@ class GameRecommender:
         """Calculate weight score (0-10) based on price, peak_ccu, and positive rate"""
         try:
             # Get game attributes
-            price = float(game.get('price', 100))  # Default to 100 if price is missing
+            price = float(game.get('price', 100))
             peak_ccu = int(game.get('peak_ccu', 0))
             positive = int(game.get('positive', 0))
             negative = int(game.get('negative', 0))
@@ -219,27 +219,83 @@ class GameRecommender:
             total_reviews = positive + negative
             positive_rate = positive / total_reviews if total_reviews > 0 else 0
             
-            # Peak CCU: higher is better
+            # Normalize Peak CCU
             max_ccu = 100000  # Assuming max peak CCU is 100,000
             ccu_score = min(peak_ccu / max_ccu, 1)
             
-            # Positive rate: higher is better
+            # Normalize Positive Rate
             positive_score = positive_rate
             
-            # Check if price range is above $50
+            # Normalize Price
+            max_price_for_score = 100 # Use a consistent max price for normalization
+            price_score = 1 - (price / max_price_for_score) if price <= max_price_for_score else 0
+
+            # Calculate final weight (0-10) based on selected price range
             if max_price > 50:
-                # Exclude price from calculation, adjust weights
-                weight = (ccu_score * 0.5 + positive_score * 0.5) * 10
+                # Reduced weight for price (e.g., 10%), increased for others
+                weight = (price_score * 0.1 + ccu_score * 0.45 + positive_score * 0.45) * 10
             else:
-                # Include price in calculation
-                max_price = 100  # Assuming max price is $100
-                price_score = 1 - (price / max_price) if price <= max_price else 0
+                # Original weights for lower price ranges
                 weight = (price_score * 0.4 + ccu_score * 0.3 + positive_score * 0.3) * 10
             
             return round(weight, 1)
         except Exception as e:
             print(f"Error calculating weight: {e}")
             return 0.0
+
+    def sort_games(self, games, min_price, max_price, sort_by="weight"):
+        """Sort games based on selected criteria"""
+        sorted_games = []
+        for game in games:
+            # Get game attributes
+            price = float(game.get('price', 100))
+            peak_ccu = int(game.get('peak_ccu', 0))
+            positive = int(game.get('positive', 0))
+            negative = int(game.get('negative', 0))
+            total_reviews = positive + negative
+            positive_rate = positive / total_reviews if total_reviews > 0 else 0
+            
+            # Calculate weight score
+            weight = self.calculate_game_weight(game, min_price, max_price)
+            
+            # Create sort key based on selected criteria
+            if sort_by == "price":
+                # Price: Ascending (lower is better)
+                sort_key = (price, -peak_ccu, -positive_rate) # Add secondary sort factors
+            elif sort_by == "peak_ccu":
+                # Peak CCU: Descending (higher is better)
+                # Use positive peak_ccu with reverse=True for descending sort
+                sort_key = (peak_ccu, weight, -positive_rate) # Add secondary sort factors
+            elif sort_by == "positive_rate":
+                # Positive Rate: Descending (higher is better)
+                # Use positive rate with reverse=True for descending sort
+                sort_key = (positive_rate, weight, -peak_ccu) # Add secondary sort factors
+            else:  # weight (default)
+                # Weight: Descending (higher is better)
+                sort_key = (
+                    weight,
+                    -peak_ccu,
+                    -positive_rate,
+                    -(positive + negative)
+                )
+            
+            sorted_games.append((sort_key, game))
+        
+        # Sort based only on the sort_key (first element of the tuple)
+        # For price, sorting ascending (lowest first)
+        # For others, sorting descending (highest first)
+        reverse_sort = sort_by != "price"
+        sorted_games.sort(key=lambda item: item[0], reverse=reverse_sort)
+        
+        # Return only the game objects
+        return [game for _, game in sorted_games]
+
+    def get_weight_formula_text(self, min_price, max_price):
+        """Generate text explaining the weight score calculation"""
+        if max_price > 50:
+            return "Weight Score = (Price Score × 0.1) + (Peak CCU Score × 0.45) + (Positive Rate × 0.45)"
+        else:
+            return "Weight Score = (Price Score × 0.4) + (Peak CCU Score × 0.3) + (Positive Rate × 0.3)"
 
     def show_recommendations(self):
         try:
@@ -259,8 +315,10 @@ class GameRecommender:
             if platform_conditions:
                 query["$or"] = platform_conditions
             
-            # Execute query and sort by peak_ccu
-            results = self.collection.find(query).sort("peak_ccu", -1).limit(20)
+            # --- Optimization: Preliminary sort/limit in DB ---
+            prelim_limit = 100 
+            prelim_results_cursor = self.collection.find(query).sort("peak_ccu", -1).limit(prelim_limit)
+            prelim_results = list(prelim_results_cursor)
             
             # Clear existing widgets
             for widget in self.root.winfo_children():
@@ -280,6 +338,81 @@ class GameRecommender:
                 fg='#333333'
             )
             desc_label.pack(pady=10)
+            
+            # Add sorting options
+            sort_frame = ttk.Frame(results_frame)
+            sort_frame.pack(fill="x", padx=10, pady=5)
+            
+            sort_label = tk.Label(
+                sort_frame,
+                text="Sort by:",
+                font=('Arial', 9),
+                bg='#f0f0f0',
+                fg='#333333'
+            )
+            sort_label.pack(side="left", padx=5)
+            
+            self.sort_var = tk.StringVar(value="weight")
+            sort_options = ttk.Combobox(
+                sort_frame,
+                textvariable=self.sort_var,
+                values=["weight", "price", "peak_ccu", "positive_rate"],
+                state="readonly",
+                width=15
+            )
+            sort_options.pack(side="left", padx=5)
+            
+            # Add sort button
+            sort_button = ttk.Button(
+                sort_frame,
+                text="Sort",
+                command=lambda: self.update_sort(min_price, max_price, prelim_results, results_frame)
+            )
+            sort_button.pack(side="left", padx=5)
+            
+            # Add weight formula explanation
+            formula_frame = ttk.Frame(results_frame)
+            formula_frame.pack(fill="x", padx=10, pady=5)
+            
+            formula_title = tk.Label(
+                formula_frame,
+                text="Weight Score Calculation:",
+                font=('Arial', 10, 'bold'),
+                bg='#f0f0f0',
+                fg='#2c5282'
+            )
+            formula_title.pack(anchor="w")
+            
+            formula_text = tk.Label(
+                formula_frame,
+                text=self.get_weight_formula_text(min_price, max_price),
+                font=('Arial', 9),
+                bg='#f0f0f0',
+                fg='#333333'
+            )
+            formula_text.pack(anchor="w", padx=20)
+            
+            # Add formula details
+            details_text = """
+            • Price Score: Lower price = Higher score (max $100)
+            • Peak CCU Score: Higher player count = Higher score (max 100,000)
+            • Positive Rate: Higher positive reviews = Higher score
+            """
+            details_label = tk.Label(
+                formula_frame,
+                text=details_text,
+                font=('Arial', 8),
+                bg='#f0f0f0',
+                fg='#666666',
+                justify='left'
+            )
+            details_label.pack(anchor="w", padx=20, pady=5)
+            
+            # Now sort this smaller list using our custom weight-based sorting
+            sorted_results = self.sort_games(prelim_results, min_price, max_price, self.sort_var.get())
+            
+            # Limit to the final number needed for display (top 20)
+            results = sorted_results[:20]
             
             # Create canvas and scrollbar for scrollable frame
             canvas = tk.Canvas(results_frame, bg='#f0f0f0', highlightthickness=0)
@@ -423,6 +556,112 @@ class GameRecommender:
         
         self.selection_count_label.config(text=f"Selected: {selected_count}/{self.max_selections}")
     
+    def update_sort(self, min_price, max_price, games, results_frame):
+        """Update the display with new sorting"""
+        try:
+            # Get the canvas and scrollable frame
+            canvas = None
+            scrollable_frame = None
+            for widget in results_frame.winfo_children():
+                if isinstance(widget, tk.Canvas):
+                    canvas = widget
+                    scrollable_frame = widget.winfo_children()[0]
+                    break
+            
+            if not canvas or not scrollable_frame:
+                return
+            
+            # Clear existing game widgets
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+            
+            # Sort games with new criteria
+            sorted_results = self.sort_games(games, min_price, max_price, self.sort_var.get())
+            results = sorted_results[:20]
+            
+            # Add results to scrollable frame
+            for game in results:
+                game_frame = ttk.Frame(scrollable_frame)
+                game_frame.pack(fill="x", padx=5, pady=5)
+                
+                # Calculate weight for this game
+                weight = self.calculate_game_weight(game, min_price, max_price)
+                
+                # Create checkbox
+                var = tk.BooleanVar()
+                self.game_checkboxes[str(game.get("_id"))] = var
+                
+                # Create a frame for the checkbox and game details
+                content_frame = ttk.Frame(game_frame)
+                content_frame.pack(fill="x", expand=True)
+                
+                # Create checkbox with custom style
+                checkbox = ttk.Checkbutton(
+                    content_frame,
+                    text=game.get("name", "Unknown"),
+                    variable=var,
+                    command=lambda gid=str(game.get("_id")): self.update_selection_count(gid),
+                    style='TCheckbutton'
+                )
+                checkbox.pack(side="left", padx=5)
+                
+                # Add game details
+                details_frame = ttk.Frame(content_frame)
+                details_frame.pack(side="left", fill="x", expand=True, padx=10)
+                
+                # First row: Basic details
+                basic_details = f"Price: ${game.get('price', 0)} | Peak CCU: {game.get('peak_ccu', 0)}"
+                
+                # Calculate positive rate
+                positive = game.get("positive", 0)
+                negative = game.get("negative", 0)
+                if positive + negative > 0:
+                    positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
+                else:
+                    positive_rate = "N/A"
+                basic_details += f" | Positive Rate: {positive_rate}"
+                
+                ttk.Label(details_frame, text=basic_details).pack(anchor="w")
+                
+                # Second row: Tags
+                tags_text = "Tags: "
+                try:
+                    tags = game.get("tags", "")
+                    if tags:
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])
+                    else:
+                        tags_text += "None"
+                except:
+                    tags_text += "None"
+                
+                ttk.Label(details_frame, text=tags_text).pack(anchor="w")
+                
+                # Third row: Weight Score
+                weight_text = f"Weight Score: {weight}/10"
+                weight_label = tk.Label(
+                    details_frame,
+                    text=weight_text,
+                    font=('Arial', 9, 'bold'),
+                    bg='#f0f0f0',
+                    fg='#2c5282'
+                )
+                weight_label.pack(anchor="w")
+                
+                # Add separator
+                separator = ttk.Separator(game_frame, orient='horizontal')
+                separator.pack(fill='x', pady=5)
+            
+            # Update canvas scrollregion
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while sorting: {e}")
+            print(f"Error in update_sort: {e}")
+            import traceback
+            traceback.print_exc()
+
     def show_similar_games(self):
         try:
             # Get selected game IDs (as strings)
@@ -502,17 +741,97 @@ class GameRecommender:
                 query["$or"] = platform_conditions
             # --- End integrating filters into query ---
             
-            # Execute query and sort by peak_ccu
-            results = self.collection.find(query).sort("peak_ccu", -1).limit(10)
+            # --- Optimization: Preliminary sort/limit in DB ---
+            # Fetch a larger subset (e.g., 50) sorted by peak_ccu
+            prelim_limit = 50
+            similar_games_cursor = self.collection.find(query).sort("peak_ccu", -1).limit(prelim_limit)
+            similar_games_list = list(similar_games_cursor)
+            
+            # Now sort this smaller list using our custom weight-based sorting
+            sorted_similar_games = self.sort_games(similar_games_list, min_price, max_price)
+            
+            # Limit to the final number needed for display (top 10)
+            results = sorted_similar_games[:10]
+            # --- End Optimization ---
             
             # Create new window for similar games
             similar_window = tk.Toplevel(self.root)
             similar_window.title("Similar Games")
-            similar_window.geometry("800x600")
+            similar_window.geometry("1000x700")
+            similar_window.configure(bg='#f0f0f0')
             
             # Create results frame
             results_frame = ttk.LabelFrame(similar_window, text=f"Games similar to your selections")
             results_frame.pack(padx=20, pady=20, fill="both", expand=True)
+            
+            # Add sorting options
+            sort_frame = ttk.Frame(results_frame)
+            sort_frame.pack(fill="x", padx=10, pady=5)
+            
+            sort_label = tk.Label(
+                sort_frame,
+                text="Sort by:",
+                font=('Arial', 9),
+                bg='#f0f0f0',
+                fg='#333333'
+            )
+            sort_label.pack(side="left", padx=5)
+            
+            self.similar_sort_var = tk.StringVar(value="weight")
+            sort_options = ttk.Combobox(
+                sort_frame,
+                textvariable=self.similar_sort_var,
+                values=["weight", "price", "peak_ccu", "positive_rate"],
+                state="readonly",
+                width=15
+            )
+            sort_options.pack(side="left", padx=5)
+            
+            # Add sort button
+            sort_button = ttk.Button(
+                sort_frame,
+                text="Sort",
+                command=lambda: self.update_similar_sort(min_price, max_price, similar_games_list, results_frame)
+            )
+            sort_button.pack(side="left", padx=5)
+            
+            # Add weight formula explanation
+            formula_frame = ttk.Frame(results_frame)
+            formula_frame.pack(fill="x", padx=10, pady=5)
+            
+            formula_title = tk.Label(
+                formula_frame,
+                text="Weight Score Calculation:",
+                font=('Arial', 10, 'bold'),
+                bg='#f0f0f0',
+                fg='#2c5282'
+            )
+            formula_title.pack(anchor="w")
+            
+            formula_text = tk.Label(
+                formula_frame,
+                text=self.get_weight_formula_text(min_price, max_price),
+                font=('Arial', 9),
+                bg='#f0f0f0',
+                fg='#333333'
+            )
+            formula_text.pack(anchor="w", padx=20)
+            
+            # Add formula details
+            details_text = """
+            • Price Score: Lower price = Higher score (max $100)
+            • Peak CCU Score: Higher player count = Higher score (max 100,000)
+            • Positive Rate: Higher positive reviews = Higher score
+            """
+            details_label = tk.Label(
+                formula_frame,
+                text=details_text,
+                font=('Arial', 8),
+                bg='#f0f0f0',
+                fg='#666666',
+                justify='left'
+            )
+            details_label.pack(anchor="w", padx=20, pady=5)
             
             # Display the top tags being used for recommendation
             tags_frame = ttk.Frame(results_frame)
@@ -645,6 +964,112 @@ class GameRecommender:
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred while fetching similar games: {e}")
             # Print detailed error for debugging
+            import traceback
+            traceback.print_exc()
+
+    def update_similar_sort(self, min_price, max_price, games, results_frame):
+        """Update the display with new sorting for similar games"""
+        try:
+            # Get the canvas and scrollable frame
+            canvas = None
+            scrollable_frame = None
+            for widget in results_frame.winfo_children():
+                if isinstance(widget, tk.Canvas):
+                    canvas = widget
+                    scrollable_frame = widget.winfo_children()[0]
+                    break
+            
+            if not canvas or not scrollable_frame:
+                return
+            
+            # Clear existing game widgets
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+            
+            # Sort games with new criteria
+            sorted_results = self.sort_games(games, min_price, max_price, self.similar_sort_var.get())
+            results = sorted_results[:10]
+            
+            # Add results to scrollable frame
+            for game in results:
+                game_frame = ttk.Frame(scrollable_frame)
+                game_frame.pack(fill="x", padx=5, pady=5)
+                
+                # Calculate weight for this game
+                weight = self.calculate_game_weight(game, min_price, max_price)
+                
+                # Create checkbox
+                var = tk.BooleanVar()
+                self.game_checkboxes[str(game.get("_id"))] = var
+                
+                # Create a frame for the checkbox and game details
+                content_frame = ttk.Frame(game_frame)
+                content_frame.pack(fill="x", expand=True)
+                
+                # Create checkbox with custom style
+                checkbox = ttk.Checkbutton(
+                    content_frame,
+                    text=game.get("name", "Unknown"),
+                    variable=var,
+                    command=lambda gid=str(game.get("_id")): self.update_selection_count(gid),
+                    style='TCheckbutton'
+                )
+                checkbox.pack(side="left", padx=5)
+                
+                # Add game details
+                details_frame = ttk.Frame(content_frame)
+                details_frame.pack(side="left", fill="x", expand=True, padx=10)
+                
+                # First row: Basic details
+                basic_details = f"Price: ${game.get('price', 0)} | Peak CCU: {game.get('peak_ccu', 0)}"
+                
+                # Calculate positive rate
+                positive = game.get("positive", 0)
+                negative = game.get("negative", 0)
+                if positive + negative > 0:
+                    positive_rate = f"{positive / (positive + negative) * 100:.1f}%"
+                else:
+                    positive_rate = "N/A"
+                basic_details += f" | Positive Rate: {positive_rate}"
+                
+                ttk.Label(details_frame, text=basic_details).pack(anchor="w")
+                
+                # Second row: Tags
+                tags_text = "Tags: "
+                try:
+                    tags = game.get("tags", "")
+                    if tags:
+                        tag_str = tags.replace("'", "\"")
+                        tag_dict = json.loads(tag_str)
+                        tags_text += ", ".join(list(tag_dict.keys())[:5])
+                    else:
+                        tags_text += "None"
+                except:
+                    tags_text += "None"
+                
+                ttk.Label(details_frame, text=tags_text).pack(anchor="w")
+                
+                # Third row: Weight Score
+                weight_text = f"Weight Score: {weight}/10"
+                weight_label = tk.Label(
+                    details_frame,
+                    text=weight_text,
+                    font=('Arial', 9, 'bold'),
+                    bg='#f0f0f0',
+                    fg='#2c5282'
+                )
+                weight_label.pack(anchor="w")
+                
+                # Add separator
+                separator = ttk.Separator(game_frame, orient='horizontal')
+                separator.pack(fill='x', pady=5)
+            
+            # Update canvas scrollregion
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while sorting: {e}")
+            print(f"Error in update_similar_sort: {e}")
             import traceback
             traceback.print_exc()
 
