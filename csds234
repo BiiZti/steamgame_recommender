@@ -44,8 +44,8 @@ class GameRecommender:
             # Use the SRV format as recommended in MongoDB Atlas
             connection_url = "mongodb+srv://G:WSGdsb123321.@ac-lsikpgh.wtghhj8.mongodb.net/?retryWrites=true&w=majority&appName=project234"
             
-            # Connect with minimal options
-            self.client = MongoClient(connection_url)
+            # Connect with SSL verification disabled
+            self.client = MongoClient(connection_url, tlsAllowInvalidCertificates=True)
             self.db = self.client["steamDB"]
             self.collection = self.db["steam_games"]
             print("MongoDB connected successfully")
